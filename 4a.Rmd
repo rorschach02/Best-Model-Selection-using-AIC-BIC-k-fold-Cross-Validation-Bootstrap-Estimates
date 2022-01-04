@@ -1,0 +1,308 @@
+---
+title: "4a - Aniket Maheshwari"
+output: word_document
+---
+
+
+Setting up our environment and importing important libraries:
+```{r}
+### Clear the environment 
+rm(list = ls())
+
+
+### First we will set the directory of the R script 
+setwd("C:/Users/anike/Desktop/Sem 1/EAS 506 Statistical Data Mining/Homework/Homework 4")
+
+
+## Loading all the libraries 
+library(ISLR)
+library(corrplot)
+library(MASS)
+library(klaR)
+library(leaps)
+library(lattice)
+library(ggplot2)
+library(corrplot)
+library(car)
+library(caret)
+library(class)
+library(boot)
+#install.packages("bootstrap")
+library(bootstrap)
+```
+
+
+Importing the dataset: 
+
+```{r}
+data("Boston")
+dim(Boston)
+str(Boston)
+data1 <- Boston
+summary(Boston)
+```
+
+So the dataset 'Boston' has 506 rows and 14 columns or features. All the features are numerical variables.
+
+Before starting EDA, first i’ll check whether the data has any missing values or not:
+
+```{r}
+NAmat = matrix(as.numeric(is.na(data1)) , ncol = 14)
+nonNAdx = which(rowSums(NAmat) == 0)
+length(nonNAdx)
+dim(data1)
+```
+
+so there are no missing value as length of nonNAdx is equal to number of rows in dataset Boston.
+
+
+Now, the value of the different feature are in different size of scale. For example, crim is between 0.00632 - 88.97620 range whereas tax is in between 187-711 range. So i need to normalize this dataset so that all the features are in one scale before working on the dataset.
+
+Normalization: 
+```{r}
+
+
+normalize <- function(x) {
+  (x -min(x)) / (max(x) - min(x))
+  
+}
+
+Boston_Norm <- as.data.frame(lapply(data1[1:14], normalize))
+head(Boston_Norm , 1)
+
+```
+
+
+Now the full data set is normalized.
+
+Splitting the data set into test and train data:
+Now, I'll split the data into test and train dataset in 2:8 ratio. After the splitting, the train dataset will have 404 rows and 14 columns and test data set will have 102 rows and 14 columns.
+```{r}
+set.seed(1)
+sample_size <- floor(0.80 * nrow(Boston_Norm))
+set.seed(1)
+train_indexes <- sample(seq_len(nrow(Boston_Norm)), size = sample_size)
+training_data <- Boston_Norm[train_indexes ,]
+testing_data <- Boston_Norm[-train_indexes ,]
+dim(training_data)
+dim(testing_data)
+```
+
+Best Subset Selection: 
+Best subset selection is a method that aims to find the subset of independent variables (Xi) that best predict the outcome (Y) and it does so by considering all possible combinations of independent variables.
+
+The R function regsubsets() [leaps package] can be used to identify different best models of different sizes.
+
+```{r}
+boston_best_subset <- regsubsets(medv ~ . , data = training_data , nbest = 1,  really.big = TRUE , nvmax = 13) 
+boston_best_subset_summary <- summary(boston_best_subset)
+boston_best_subset_summary
+```
+
+
+Model Selection using best subset regression:
+The summary() function has some metrics that allows us to determine the best overall model with least error value. 
+I'll use AIC/CP and BIC metric.
+
+1. AIC/CP
+```{r}
+which.min(boston_best_subset_summary$cp)
+# model with 11 features has the lowest AIC error 
+x11()
+plot(boston_best_subset_summary$cp ,xlab=" Number of Variables ",ylab=" Cp", type="l")
+points(11, boston_best_subset_summary$cp[11],col="red" , cex = 2 , pch = 20)
+```
+
+
+
+```{r}
+x11()
+plot(boston_best_subset, scale = "Cp")
+```
+
+So AIC gives minimum error in model with 11 variables.
+
+
+2. BIC 
+```{r}
+which.min(boston_best_subset_summary$bic)
+# model with 9 features has the lowest BIC error 
+x11()
+plot(boston_best_subset_summary$bic ,xlab=" Number of Variables ",ylab=" BIC", type="l")
+points(9, boston_best_subset_summary$bic[9],col="red" , cex = 2 , pch = 20)
+```
+
+
+```{r}
+x11()
+plot(boston_best_subset, scale = "bic")
+```
+
+So BIC gives minimum error in model with 9 variables.
+
+3. K-Fold Cross Validation: 
+The k-fold Cross-validation consists of first dividing the data into k subsets. Each subset[10%] is used as test dataset and remaining[90%] subset serves as training dataset. 
+
+a) 5-fold cross validation:
+
+```{r}
+predict.regsubsets = function(object,newdata,id , ...){
+  form = as.formula((object$call[[2]]))
+  mat = model.matrix(form, newdata)
+  coefi = coef(object , id = id)
+  xvars = names(coefi)
+  mat[,xvars]%*%coefi
+  
+}
+
+
+set.seed(1)
+k = 5
+
+five_fold_error <- matrix(NA, k, 13)
+
+five_fold = sample(1:k, nrow(training_data), replace = TRUE)
+
+
+for (i in 1:k)
+{
+  best_subset = regsubsets(medv~., data = training_data[five_fold!=i, ], nvmax = 13)
+  
+  for (j in 1:13)
+  {
+    predictions = predict(best_subset, training_data[five_fold==i, ], id=j)
+    five_fold_error[i,j] = mean((training_data$medv[five_fold==i]-predictions)^2)
+  }
+  
+}
+
+five_fold_error
+```
+
+5 - fold cross validation error: 
+```{r}
+mse.models <- apply(five_fold_error, 2, mean)  
+mse.models
+```
+
+
+Plotting the 5-fold cross-validation error: 
+```{r}
+x11()
+plot(mse.models , pch=19, type="b",xlab="Predictors",ylab="MSE errors")
+which.min(mse.models)
+```
+5 - fold cross validation has 11 variable model with the lowest error. 
+
+b) 10-fold cross validation:
+
+```{r}
+set.seed(1)
+k = 10
+
+ten_fold = sample(1:k, nrow(training_data), replace = TRUE)
+
+
+ten_fold_cross = matrix(NA, k, 13)
+
+for (i in 1:k)
+{
+  best_subset1 = regsubsets(medv~., data = training_data[ten_fold!=i, ], nvmax = 13)
+  
+  for (j in 1:13)
+  {
+    predictions1 = predict(best_subset1, training_data[ten_fold==i, ], id=j)
+    ten_fold_cross[i,j] = mean((training_data$medv[ten_fold==i]-predictions1)^2)
+  }
+  
+}
+ten_fold_cross
+```
+
+10-Fold cross-validation error:
+```{r}
+mse.models1 = apply(ten_fold_cross, 2, mean)
+which.min(mse.models1)
+```
+Plotting the errors:
+```{r}
+x11()
+plot(mse.models1 , pch=19, type="b",xlab="Predictors",ylab="MSE errors")
+
+```
+
+Like 5 fold cross-validation, 10 fold cross validation also gives 11 variable model with lowest error rate. 
+
+
+
+4. Bootstrap .632 estimator: 
+Now, I'll use bootstrap estimator for model selection. I will use bootstrap .632 estimator for prediction error.
+
+```{r}
+
+beta.fit <- function(X,Y)
+{
+  lsfit(X,Y)
+}
+
+beta.predict<- function(fit, X)
+{
+  cbind(1,X)%*%fit$coef
+}
+
+sq.error<- function(Y, Yhat)
+{
+  (Y-Yhat)^2
+}
+
+
+# Creating X and Y 
+
+X <- Boston_Norm [,1:13]
+Y <- Boston_Norm [,14]
+dim(X)
+length(Y)
+
+select <- boston_best_subset_summary$outmat
+
+error_values = c()
+ 
+for (i in 1:13){
+  temp <- which(select[i,] == "*")
+  res<- bootpred(X[,temp], Y, nboot = 50, theta.fit = beta.fit, theta.predict = beta.predict,  err.meas = sq.error)
+  error_values <- c(error_values, res[[3]])
+}
+
+error_values
+
+
+```
+Plotting the Bootstrap .632 prediction error: 
+```{r}
+x11()
+plot(error_values , pch=19, type="b",xlab="Predictors",ylab="Bootstrap .632 Error Values")
+
+```
+
+So, Bootstrap estimator .632 gives 12 variable model with least error rate. 
+
+
+Comparing all the model selection methods: 
+
+```{r}
+output <- data.frame(
+  AIC = which.min(boston_best_subset_summary$cp),
+  BIC = which.min(boston_best_subset_summary$bic),
+  Five_Fold_Cross_Validation = which.min(mse.models),
+  Ten_Fold_Cross_Validation = which.min(mse.models1),
+  Bootstrap_632 = which.min(error_values)
+)
+
+output
+
+```
+
+
+
+
+
